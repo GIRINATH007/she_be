@@ -11,7 +11,7 @@ import (
 // GenerateAgoraToken generates an RTC token for a given channel and user.
 // The token expires after the specified duration.
 func GenerateAgoraToken(channelName string, uid uint32, expireSeconds uint32) (string, error) {
-	cfg := config.GetAppWriteConfig()
+	cfg := config.GetSupabaseConfig()
 
 	if cfg.AgoraAppID == "" || cfg.AgoraAppCert == "" {
 		return "", fmt.Errorf("Agora credentials not configured")

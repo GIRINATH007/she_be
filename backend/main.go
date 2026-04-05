@@ -9,7 +9,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/sheguard/backend/config"
 	"github.com/sheguard/backend/handlers"
-	appwritemw "github.com/sheguard/backend/middleware"
+	sgmiddleware "github.com/sheguard/backend/middleware"
 )
 
 func main() {
@@ -18,21 +18,21 @@ func main() {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	// Initialize AppWrite client
+	// Initialize Supabase config
 	cfg := config.Load()
-	config.InitAppWrite(cfg)
+	config.InitSupabase(cfg)
 
 	e := echo.New()
 
 	// --------------- Global Middleware ---------------
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
-	e.Use(appwritemw.SecurityHeaders)
-	e.Use(appwritemw.SanitizeMiddleware)
+	e.Use(sgmiddleware.SecurityHeaders)
+	e.Use(sgmiddleware.SanitizeMiddleware)
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"*"},
 		AllowMethods: []string{echo.GET, echo.POST, echo.PATCH, echo.DELETE},
-		AllowHeaders: []string{echo.HeaderContentType, echo.HeaderAuthorization, "X-User-ID"},
+		AllowHeaders: []string{echo.HeaderContentType, echo.HeaderAuthorization},
 	}))
 	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(20)))
 
@@ -40,7 +40,7 @@ func main() {
 	e.GET("/health", handlers.HealthCheck)
 
 	// --------------- Protected Routes ---------------
-	api := e.Group("/api", appwritemw.AuthMiddleware)
+	api := e.Group("/api", sgmiddleware.AuthMiddleware)
 
 	// Profile
 	api.GET("/me", handlers.GetProfile)
@@ -65,13 +65,17 @@ func main() {
 	api.POST("/walk/cancel/:id", handlers.CancelWalk)
 	api.GET("/walk/active", handlers.GetActiveWalk)
 
+	// Location (persisted)
+	api.POST("/location", handlers.SaveLocation)
+	api.GET("/contacts/locations", handlers.GetContactLocations)
+
 	// --------------- WebSocket (location) ---------------
 	e.GET("/ws/location", handlers.LocationWebSocket)
 
 	// --------------- Start Server ---------------
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8081"
 	}
 	e.Logger.Fatal(e.Start(":" + port))
 }

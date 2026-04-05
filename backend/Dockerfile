@@ -17,6 +17,6 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
 COPY --from=builder /sheguard-server /sheguard-server
 
-EXPOSE 8080
+EXPOSE 8081
 
 CMD ["/sheguard-server"]

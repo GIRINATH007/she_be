@@ -1,9 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -14,9 +11,9 @@ import (
 // GetContacts lists all contacts for the current user.
 func GetContacts(c echo.Context) error {
 	userID := c.Get("userId").(string)
-	cfg := config.GetAppWriteConfig()
+	cfg := config.GetSupabaseConfig()
 
-	docs, err := queryAppWriteDocuments(cfg, "contacts", "ownerId", userID)
+	docs, err := querySupabaseDocuments(cfg, "contacts", "ownerId", userID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to fetch contacts"})
 	}
@@ -50,7 +47,7 @@ func GetContacts(c echo.Context) error {
 // AddContact adds a new contact for the current user.
 func AddContact(c echo.Context) error {
 	userID := c.Get("userId").(string)
-	cfg := config.GetAppWriteConfig()
+	cfg := config.GetSupabaseConfig()
 
 	var input struct {
 		Phone string `json:"phone"`
@@ -74,7 +71,7 @@ func AddContact(c echo.Context) error {
 	}
 
 	// Find user by phone number in profiles collection
-	targetProfile, err := queryAppWriteDocumentByField(cfg, "profiles", "phone", strings.TrimSpace(input.Phone))
+	targetProfile, err := querySupabaseDocumentByField(cfg, "profiles", "phone", strings.TrimSpace(input.Phone))
 	if err != nil || targetProfile == nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "no user found with this phone number"})
 	}
@@ -87,7 +84,7 @@ func AddContact(c echo.Context) error {
 	}
 
 	// Check if already added
-	existing, _ := queryAppWriteDocuments(cfg, "contacts", "ownerId", userID)
+	existing, _ := querySupabaseDocuments(cfg, "contacts", "ownerId", userID)
 	for _, doc := range existing {
 		if doc["contactUserId"] == targetUserID {
 			return c.JSON(http.StatusConflict, map[string]string{"error": "contact already added"})
@@ -115,7 +112,7 @@ func AddContact(c echo.Context) error {
 		"status":        "accepted", // For MVP, auto-accept
 	}
 
-	doc, err := createAppWriteDocument(cfg, "contacts", data)
+	doc, err := createSupabaseDocument(cfg, "contacts", data)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to add contact"})
 	}
@@ -127,7 +124,7 @@ func AddContact(c echo.Context) error {
 		"type":          "casual", // Reverse is always casual by default
 		"status":        "accepted",
 	}
-	createAppWriteDocument(cfg, "contacts", reverseData)
+	createSupabaseDocument(cfg, "contacts", reverseData)
 
 	return c.JSON(http.StatusCreated, doc)
 }
@@ -135,7 +132,7 @@ func AddContact(c echo.Context) error {
 // UpdateContact updates a contact's type (casual/trusted).
 func UpdateContact(c echo.Context) error {
 	userID := c.Get("userId").(string)
-	cfg := config.GetAppWriteConfig()
+	cfg := config.GetSupabaseConfig()
 	contactID := c.Param("id")
 
 	var input struct {
@@ -149,9 +146,19 @@ func UpdateContact(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "type must be 'casual' or 'trusted'"})
 	}
 
+	existingContact, err := getSupabaseDocument(cfg, "contacts", contactID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "contact not found"})
+	}
+
+	ownerID, _ := existingContact["ownerId"].(string)
+	if ownerID != userID {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "you cannot update this contact"})
+	}
+
 	// Enforce trusted limit when promoting to trusted
 	if input.Type == "trusted" {
-		existing, _ := queryAppWriteDocuments(cfg, "contacts", "ownerId", userID)
+		existing, _ := querySupabaseDocuments(cfg, "contacts", "ownerId", userID)
 		trustedCount := 0
 		for _, doc := range existing {
 			if doc["type"] == "trusted" {
@@ -163,7 +170,7 @@ func UpdateContact(c echo.Context) error {
 		}
 	}
 
-	doc, err := updateAppWriteDocument(cfg, "contacts", contactID, map[string]interface{}{
+	doc, err := updateSupabaseDocument(cfg, "contacts", contactID, map[string]interface{}{
 		"type": input.Type,
 	})
 	if err != nil {
@@ -175,12 +182,39 @@ func UpdateContact(c echo.Context) error {
 
 // DeleteContact removes a contact.
 func DeleteContact(c echo.Context) error {
-	cfg := config.GetAppWriteConfig()
+	userID := c.Get("userId").(string)
+	cfg := config.GetSupabaseConfig()
 	contactID := c.Param("id")
 
-	err := deleteAppWriteDocument(cfg, "contacts", contactID)
+	existingContact, err := getSupabaseDocument(cfg, "contacts", contactID)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "contact not found"})
+	}
+
+	ownerID, _ := existingContact["ownerId"].(string)
+	if ownerID != userID {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "you cannot delete this contact"})
+	}
+
+	contacts, _ := querySupabaseDocuments(cfg, "contacts", "ownerId", userID)
+	if len(contacts) <= 1 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "at least one contact is required"})
+	}
+
+	err = deleteSupabaseDocument(cfg, "contacts", contactID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to delete contact"})
+	}
+
+	contactUserID, _ := existingContact["contactUserId"].(string)
+	reverseDocs, _ := querySupabaseDocuments(cfg, "contacts", "ownerId", contactUserID)
+	for _, doc := range reverseDocs {
+		reverseContactUserID, _ := doc["contactUserId"].(string)
+		reverseDocID, _ := doc["$id"].(string)
+		if reverseContactUserID == userID && reverseDocID != "" {
+			_ = deleteSupabaseDocument(cfg, "contacts", reverseDocID)
+			break
+		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "contact removed"})
@@ -188,14 +222,14 @@ func DeleteContact(c echo.Context) error {
 
 // SearchUserByPhone searches for a user by phone number.
 func SearchUserByPhone(c echo.Context) error {
-	cfg := config.GetAppWriteConfig()
+	cfg := config.GetSupabaseConfig()
 	phone := c.QueryParam("phone")
 
 	if strings.TrimSpace(phone) == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "phone query param is required"})
 	}
 
-	profile, err := queryAppWriteDocumentByField(cfg, "profiles", "phone", strings.TrimSpace(phone))
+	profile, err := querySupabaseDocumentByField(cfg, "profiles", "phone", strings.TrimSpace(phone))
 	if err != nil || profile == nil {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "no user found"})
 	}
@@ -205,58 +239,4 @@ func SearchUserByPhone(c echo.Context) error {
 		"name":   profile["name"],
 		"phone":  profile["phone"],
 	})
-}
-
-// ---------- Additional AppWrite helpers ----------
-
-func queryAppWriteDocuments(cfg *config.Config, collectionID, field, value string) ([]map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/databases/%s/collections/%s/documents?queries[]=equal(\"%s\",[\"%s\"])&queries[]=limit(100)",
-		cfg.AppWriteEndpoint, cfg.AppWriteDBID, collectionID, field, value)
-
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("X-Appwrite-Project", cfg.AppWriteProjectID)
-	req.Header.Set("X-Appwrite-Key", cfg.AppWriteAPIKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Documents []map[string]interface{} `json:"documents"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-	return result.Documents, nil
-}
-
-func queryAppWriteDocumentByField(cfg *config.Config, collectionID, field, value string) (map[string]interface{}, error) {
-	docs, err := queryAppWriteDocuments(cfg, collectionID, field, value)
-	if err != nil || len(docs) == 0 {
-		return nil, fmt.Errorf("not found")
-	}
-	return docs[0], nil
-}
-
-func deleteAppWriteDocument(cfg *config.Config, collectionID, docID string) error {
-	url := fmt.Sprintf("%s/databases/%s/collections/%s/documents/%s",
-		cfg.AppWriteEndpoint, cfg.AppWriteDBID, collectionID, docID)
-
-	req, _ := http.NewRequest("DELETE", url, nil)
-	req.Header.Set("X-Appwrite-Project", cfg.AppWriteProjectID)
-	req.Header.Set("X-Appwrite-Key", cfg.AppWriteAPIKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("AppWrite error (%d): %s", resp.StatusCode, string(body))
-	}
-	return nil
 }

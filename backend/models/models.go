@@ -21,7 +21,7 @@ type Contact struct {
 	ID            string `json:"$id,omitempty"`
 	OwnerID       string `json:"ownerId"`
 	ContactUserID string `json:"contactUserId"`
-	Type          string `json:"type"` // "casual" or "trusted"
+	Type          string `json:"type"`   // "casual" or "trusted"
 	Status        string `json:"status"` // "pending", "accepted", "rejected"
 }
 
@@ -38,7 +38,7 @@ type Location struct {
 type SOSEvent struct {
 	ID           string    `json:"$id,omitempty"`
 	TriggeredBy  string    `json:"triggeredBy"`
-	Type         string    `json:"type"` // "timer" or "instant"
+	Type         string    `json:"type"`   // "timer" or "instant"
 	Status       string    `json:"status"` // "active" or "resolved"
 	AgoraChannel string    `json:"agoraChannel"`
 	StartedAt    time.Time `json:"startedAt"`

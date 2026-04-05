@@ -4,27 +4,29 @@ import "os"
 
 // Config holds all configuration for the application.
 type Config struct {
-	AppWriteEndpoint  string
-	AppWriteProjectID string
-	AppWriteAPIKey    string
-	AppWriteDBID      string
-	AgoraAppID        string
-	AgoraAppCert      string
-	FCMServerKey      string
-	Port              string
+	SupabaseURL            string
+	SupabaseAnonKey        string
+	SupabaseServiceRoleKey string
+	AgoraAppID             string
+	AgoraAppCert           string
+	FCMServerKey           string
+	GoogleApplicationCreds string
+	FirebaseProjectID      string
+	Port                   string
 }
 
 // Load reads configuration from environment variables.
 func Load() *Config {
 	return &Config{
-		AppWriteEndpoint:  getEnv("APPWRITE_ENDPOINT", "http://localhost/v1"),
-		AppWriteProjectID: getEnv("APPWRITE_PROJECT_ID", ""),
-		AppWriteAPIKey:    getEnv("APPWRITE_API_KEY", ""),
-		AppWriteDBID:      getEnv("APPWRITE_DB_ID", "sheguard"),
-		AgoraAppID:        getEnv("AGORA_APP_ID", ""),
-		AgoraAppCert:      getEnv("AGORA_APP_CERT", ""),
-		FCMServerKey:      getEnv("FCM_SERVER_KEY", ""),
-		Port:              getEnv("PORT", "8080"),
+		SupabaseURL:            getEnv("SUPABASE_URL", ""),
+		SupabaseAnonKey:        getEnv("SUPABASE_ANON_KEY", ""),
+		SupabaseServiceRoleKey: getEnv("SUPABASE_SERVICE_ROLE_KEY", ""),
+		AgoraAppID:             getEnv("AGORA_APP_ID", ""),
+		AgoraAppCert:           getEnv("AGORA_APP_CERT", ""),
+		FCMServerKey:           getEnv("FCM_SERVER_KEY", ""),
+		GoogleApplicationCreds: getEnv("GOOGLE_APPLICATION_CREDENTIALS", ""),
+		FirebaseProjectID:      getEnv("FIREBASE_PROJECT_ID", ""),
+		Port:                   getEnv("PORT", "8081"),
 	}
 }
 

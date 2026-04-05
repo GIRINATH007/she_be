@@ -15,7 +15,7 @@ import (
 // TriggerSOS initiates an SOS event.
 func TriggerSOS(c echo.Context) error {
 	userID := c.Get("userId").(string)
-	cfg := config.GetAppWriteConfig()
+	cfg := config.GetSupabaseConfig()
 
 	var input struct {
 		Type string  `json:"type"` // "timer" or "instant"
@@ -40,7 +40,7 @@ func TriggerSOS(c echo.Context) error {
 		// Continue without Agora — location-only SOS
 	}
 
-	// Create SOS event in AppWrite
+	// Create SOS event in Supabase
 	sosData := map[string]interface{}{
 		"triggeredBy":  userID,
 		"type":         input.Type,
@@ -48,7 +48,7 @@ func TriggerSOS(c echo.Context) error {
 		"agoraChannel": channelName,
 		"startedAt":    time.Now().UTC().Format(time.RFC3339),
 	}
-	sosDoc, err := createAppWriteDocument(cfg, "sos_events", sosData)
+	sosDoc, err := createSupabaseDocument(cfg, "sos_events", sosData)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create SOS event"})
 	}
@@ -68,7 +68,7 @@ func TriggerSOS(c echo.Context) error {
 	}
 
 	// Get all contacts and notify them
-	contacts, _ := queryAppWriteDocuments(cfg, "contacts", "ownerId", userID)
+	contacts, _ := querySupabaseDocuments(cfg, "contacts", "ownerId", userID)
 	notifiedCount := 0
 
 	for _, contact := range contacts {
@@ -77,15 +77,15 @@ func TriggerSOS(c echo.Context) error {
 
 		// Build notification data
 		notifData := services.FCMData{
-			"type":         "sos_alert",
-			"sosEventId":   sosEventID,
-			"triggeredBy":  userID,
-			"triggerName":  triggerName,
-			"contactType":  contactType,
-			"lat":          fmt.Sprintf("%f", input.Lat),
-			"lng":          fmt.Sprintf("%f", input.Lng),
-			"channelName":  channelName,
-			"agoraAppId":   cfg.AgoraAppID,
+			"type":        "sos_alert",
+			"sosEventId":  sosEventID,
+			"triggeredBy": userID,
+			"triggerName": triggerName,
+			"contactType": contactType,
+			"lat":         fmt.Sprintf("%f", input.Lat),
+			"lng":         fmt.Sprintf("%f", input.Lng),
+			"channelName": channelName,
+			"agoraAppId":  cfg.AgoraAppID,
 		}
 
 		// Only trusted contacts get Agora token for video/voice
@@ -94,10 +94,14 @@ func TriggerSOS(c echo.Context) error {
 		}
 
 		// Send push notification
-		go services.SendPushToUser(contactUserID, services.FCMNotification{
-			Title: "🆘 SOS Alert!",
-			Body:  fmt.Sprintf("%s needs help! Tap to view their location.", triggerName),
-		}, notifData)
+		go func(cuid, ctype string) {
+			if err := services.SendPushToUser(cuid, services.FCMNotification{
+				Title: "🆘 SOS Alert!",
+				Body:  fmt.Sprintf("%s needs help! Tap to view their location.", triggerName),
+			}, notifData); err != nil {
+				log.Printf("SOS: failed to send push to %s: %v", cuid, err)
+			}
+		}(contactUserID, contactType)
 
 		// Also send via WebSocket for in-app users
 		go BroadcastToUser(contactUserID, map[string]interface{}{
@@ -110,7 +114,12 @@ func TriggerSOS(c echo.Context) error {
 			"lng":         input.Lng,
 			"channelName": channelName,
 			"agoraAppId":  cfg.AgoraAppID,
-			"agoraToken":  func() string { if strings.EqualFold(contactType, "trusted") { return agoraToken }; return "" }(),
+			"agoraToken": func() string {
+				if strings.EqualFold(contactType, "trusted") {
+					return agoraToken
+				}
+				return ""
+			}(),
 		})
 
 		notifiedCount++
@@ -131,7 +140,7 @@ func TriggerSOS(c echo.Context) error {
 // ResolveSOS ends an active SOS event and cleans up resources.
 func ResolveSOS(c echo.Context) error {
 	userID := c.Get("userId").(string)
-	cfg := config.GetAppWriteConfig()
+	cfg := config.GetSupabaseConfig()
 
 	var input struct {
 		SOSEventID string `json:"sosEventId"`
@@ -141,7 +150,7 @@ func ResolveSOS(c echo.Context) error {
 	}
 
 	// Update SOS event status to resolved
-	_, err := updateAppWriteDocument(cfg, "sos_events", input.SOSEventID, map[string]interface{}{
+	_, err := updateSupabaseDocument(cfg, "sos_events", input.SOSEventID, map[string]interface{}{
 		"status":  "resolved",
 		"endedAt": time.Now().UTC().Format(time.RFC3339),
 	})
@@ -150,7 +159,7 @@ func ResolveSOS(c echo.Context) error {
 	}
 
 	// Notify all contacts that SOS is resolved
-	contacts, _ := queryAppWriteDocuments(cfg, "contacts", "ownerId", userID)
+	contacts, _ := querySupabaseDocuments(cfg, "contacts", "ownerId", userID)
 	for _, contact := range contacts {
 		contactUserID, _ := contact["contactUserId"].(string)
 		go BroadcastToUser(contactUserID, map[string]interface{}{
